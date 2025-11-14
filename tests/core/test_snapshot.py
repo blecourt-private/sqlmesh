@@ -11,6 +11,7 @@ from _pytest.monkeypatch import MonkeyPatch
 from pytest_mock.plugin import MockerFixture
 from sqlglot import exp, to_column
 
+from sqlmesh.core import dialect as d
 from sqlmesh.core import constants as c
 from sqlmesh.core.audit import StandaloneAudit
 from sqlmesh.core.config import (
@@ -114,6 +115,62 @@ def snapshot(
     )
     snapshot.version = snapshot.fingerprint.to_version()
     return snapshot
+
+
+def test_parent_change(model: SqlModel, parent_model: SqlModel, make_snapshot):
+    # Parent metadata change
+    new_parent_model = parent_model.copy(update={"description": "Parent model"})
+
+    old_snapshot = make_snapshot(model, nodes={parent_model.fqn: parent_model, model.fqn: model})
+    new_snapshot = make_snapshot(
+        model, nodes={new_parent_model.fqn: new_parent_model, model.fqn: model}
+    )
+
+    assert old_snapshot.fingerprint.parent_data_hash == new_snapshot.fingerprint.parent_data_hash
+    assert (
+        old_snapshot.fingerprint.parent_metadata_hash
+        != new_snapshot.fingerprint.parent_metadata_hash
+    )
+    assert not new_snapshot.is_directly_modified(old_snapshot)
+    assert not new_snapshot.is_indirectly_modified(old_snapshot)
+    assert not new_snapshot.is_metadata_updated(old_snapshot)
+
+    # Parent query format change
+    parent_expressions = d.parse(
+        """
+        MODEL (name "parent.tbl", dialect "spark");
+
+        SELECT 1 AS ds;
+        """
+    )
+
+    parent_model_parsed = load_sql_based_model(parent_expressions)
+
+    new_parent_expressions = d.parse(
+        """
+        MODEL (name "parent.tbl", dialect "spark");
+
+        SELECT 1   AS ds;
+        """
+    )
+
+    new_parent_model_parsed = load_sql_based_model(new_parent_expressions)
+
+    old_snapshot = make_snapshot(
+        model, nodes={parent_model_parsed.fqn: parent_model_parsed, model.fqn: model}
+    )
+    new_snapshot = make_snapshot(
+        model, nodes={new_parent_model_parsed.fqn: new_parent_model_parsed, model.fqn: model}
+    )
+
+    assert old_snapshot.fingerprint.parent_data_hash == new_snapshot.fingerprint.parent_data_hash
+    assert (
+        old_snapshot.fingerprint.parent_metadata_hash
+        == new_snapshot.fingerprint.parent_metadata_hash
+    )
+    assert not new_snapshot.is_directly_modified(old_snapshot)
+    assert not new_snapshot.is_indirectly_modified(old_snapshot)
+    assert not new_snapshot.is_metadata_updated(old_snapshot)
 
 
 def test_json(snapshot: Snapshot):
