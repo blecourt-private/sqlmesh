@@ -680,14 +680,6 @@ class PlanBuilder:
                     if mode == AutoCategorizationMode.FULL:
                         snapshot.categorize_as(SnapshotChangeCategory.BREAKING, forward_only)
         elif self._context_diff.indirectly_modified(snapshot.name):
-            if snapshot.is_materialized_view and not forward_only:
-                # We categorize changes as breaking to allow for instantaneous switches in a virtual layer.
-                # Otherwise, there might be a potentially long downtime during MVs recreation.
-                # In the case of forward-only changes this optimization is not applicable because we want to continue
-                # using the same (existing) table version.
-                snapshot.categorize_as(SnapshotChangeCategory.INDIRECT_BREAKING, forward_only)
-                return
-
             all_upstream_forward_only = set()
             all_upstream_categories = set()
             direct_parent_categories = set()
@@ -701,10 +693,24 @@ class PlanBuilder:
                     if p_id in snapshot.parents:
                         direct_parent_categories.add(parent.change_category)
 
+            # TODO: Should this be done after the MV handling?
             if all_upstream_forward_only == {True} or (
                 snapshot.is_model and snapshot.model.forward_only
             ):
                 forward_only = True
+
+            if snapshot.is_materialized_view and not forward_only:
+                # We categorize changes as breaking to allow for instantaneous switches in a virtual layer.
+                # Otherwise, there might be a potentially long downtime during MVs recreation.
+                # In the case of forward-only changes this optimization is not applicable because we want to continue
+                # using the same (existing) table version.
+
+                # TODO: Handle direct_parent_categories here as well? Just like below?
+                if all_upstream_categories == {SnapshotChangeCategory.METADATA}:
+                    snapshot.categorize_as(SnapshotChangeCategory.METADATA, forward_only)
+                else:
+                    snapshot.categorize_as(SnapshotChangeCategory.INDIRECT_BREAKING, forward_only)
+                return
 
             if direct_parent_categories.intersection(
                 {SnapshotChangeCategory.BREAKING, SnapshotChangeCategory.INDIRECT_BREAKING}

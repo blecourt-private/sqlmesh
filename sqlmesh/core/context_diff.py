@@ -20,7 +20,7 @@ from sqlmesh.core import constants as c
 from sqlmesh.core.console import get_console
 from sqlmesh.core.macros import RuntimeStage
 from sqlmesh.core.model.common import sorted_python_env_payloads
-from sqlmesh.core.snapshot import Snapshot, SnapshotId, SnapshotTableInfo
+from sqlmesh.core.snapshot import Snapshot, SnapshotId, SnapshotTableInfo, SnapshotChangeCategory
 from sqlmesh.utils.errors import SQLMeshError
 from sqlmesh.utils.pydantic import PydanticModel
 
@@ -448,6 +448,12 @@ class ContextDiff(PydanticModel):
         """
 
         if name not in self.modified_snapshots:
+            return False
+
+        # Once the snapshot change has been categorized as METADATA we know that there are
+        # either no upstream changes or that all upstream changes are metadata changes.
+        # The following ensures that such snapshots are not backfilled as part of a plan.
+        if self.snapshots_by_name[name].change_category == SnapshotChangeCategory.METADATA:
             return False
 
         current, previous = self.modified_snapshots[name]
