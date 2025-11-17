@@ -26,6 +26,7 @@ from sqlmesh.core.model import (
     SqlModel,
     ModelKindName,
 )
+from sqlmesh.core.model.common import ParsableSql
 from sqlmesh.core.model.kind import OnDestructiveChange, OnAdditiveChange, ViewKind
 from sqlmesh.core.model.seed import Seed
 from sqlmesh.core.plan import Plan, PlanBuilder, SnapshotIntervals
@@ -4232,6 +4233,126 @@ def test_indirect_change_to_materialized_view_is_breaking(make_snapshot):
     PlanBuilder(context_diff, forward_only=False).build()
 
     assert snapshot_b_new.change_category == SnapshotChangeCategory.INDIRECT_BREAKING
+
+
+def test_upstream_metadata_only_change_to_materialized_view(make_snapshot):
+    model_a = SqlModel(
+        name="a",
+        query=parse_one("select 1 as col_a"),
+        kind=ViewKind(materialized=True),
+    )
+
+    snapshot_a_old = make_snapshot(model_a)
+    snapshot_a_old.categorize_as(SnapshotChangeCategory.BREAKING)
+
+    snapshot_b_old = make_snapshot(
+        SqlModel(
+            name="b",
+            query=parse_one("select col_a from a"),
+            kind=ViewKind(materialized=True),
+        ),
+        nodes={'"a"': snapshot_a_old.model},
+    )
+    snapshot_b_old.categorize_as(SnapshotChangeCategory.BREAKING)
+
+    # Parent model metadata change: description added
+    model_a_new = model_a.copy(update={"description": "Model A"})
+
+    snapshot_a_new = make_snapshot(model_a_new)
+
+    snapshot_a_new.previous_versions = snapshot_a_old.all_versions
+
+    snapshot_b_new = make_snapshot(
+        snapshot_b_old.model,
+        nodes={'"a"': snapshot_a_new.model},
+    )
+    snapshot_b_new.previous_versions = snapshot_b_old.all_versions
+
+    context_diff = ContextDiff(
+        environment="test_environment",
+        is_new_environment=True,
+        is_unfinalized_environment=False,
+        normalize_environment_name=True,
+        create_from="prod",
+        create_from_env_exists=True,
+        added=set(),
+        removed_snapshots={},
+        modified_snapshots={
+            snapshot_a_new.name: (snapshot_a_new, snapshot_a_old),
+            snapshot_b_new.name: (snapshot_b_new, snapshot_b_old),
+        },
+        snapshots={
+            snapshot_a_new.snapshot_id: snapshot_a_new,
+            snapshot_b_new.snapshot_id: snapshot_b_new,
+        },
+        new_snapshots={
+            snapshot_a_new.snapshot_id: snapshot_a_new,
+            snapshot_b_new.snapshot_id: snapshot_b_new,
+        },
+        previous_plan_id=None,
+        previously_promoted_snapshot_ids=set(),
+        previous_finalized_snapshots=None,
+        previous_gateway_managed_virtual_layer=False,
+        gateway_managed_virtual_layer=False,
+        environment_statements=[],
+    )
+
+    PlanBuilder(context_diff, forward_only=False).build()
+
+    assert snapshot_b_new.change_category == SnapshotChangeCategory.METADATA
+
+    # Parent model query change: Raw query of parent model changes while parsed query doesn't change (whitespace added)
+    model_a_new = model_a.copy(update={"query_": ParsableSql(sql="select 1    as col_a")})
+    # TODO: Should we have these assertions?
+    assert (
+        model_a_new.query_ != model_a.query_
+    )  # The raw query of the new parent model differs from the query of the previous parent model
+    assert (
+        model_a_new.query == model_a.query
+    )  # The parsed query of the new parent model is identical to the query of the previous parent model
+
+    snapshot_a_new = make_snapshot(model_a_new)
+
+    snapshot_a_new.previous_versions = snapshot_a_old.all_versions
+
+    snapshot_b_new = make_snapshot(
+        snapshot_b_old.model,
+        nodes={'"a"': snapshot_a_new.model},
+    )
+    snapshot_b_new.previous_versions = snapshot_b_old.all_versions
+
+    context_diff = ContextDiff(
+        environment="test_environment",
+        is_new_environment=True,
+        is_unfinalized_environment=False,
+        normalize_environment_name=True,
+        create_from="prod",
+        create_from_env_exists=True,
+        added=set(),
+        removed_snapshots={},
+        modified_snapshots={
+            snapshot_a_new.name: (snapshot_a_new, snapshot_a_old),
+            snapshot_b_new.name: (snapshot_b_new, snapshot_b_old),
+        },
+        snapshots={
+            snapshot_a_new.snapshot_id: snapshot_a_new,
+            snapshot_b_new.snapshot_id: snapshot_b_new,
+        },
+        new_snapshots={
+            snapshot_a_new.snapshot_id: snapshot_a_new,
+            snapshot_b_new.snapshot_id: snapshot_b_new,
+        },
+        previous_plan_id=None,
+        previously_promoted_snapshot_ids=set(),
+        previous_finalized_snapshots=None,
+        previous_gateway_managed_virtual_layer=False,
+        gateway_managed_virtual_layer=False,
+        environment_statements=[],
+    )
+
+    PlanBuilder(context_diff, forward_only=False).build()
+
+    assert snapshot_b_new.change_category == SnapshotChangeCategory.METADATA
 
 
 def test_forward_only_indirect_change_to_materialized_view(make_snapshot):

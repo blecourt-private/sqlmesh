@@ -120,7 +120,6 @@ def snapshot(
 def test_parent_change(model: SqlModel, parent_model: SqlModel, make_snapshot):
     # Parent model metadata change: description added
     new_parent_model = parent_model.copy(update={"description": "Parent model"})
-    # new_parent_model._is_metadata_only_change_cache = {}
 
     assert new_parent_model.metadata_hash != parent_model.metadata_hash
     assert new_parent_model.data_hash == parent_model.data_hash
@@ -143,7 +142,6 @@ def test_parent_change(model: SqlModel, parent_model: SqlModel, make_snapshot):
 
     # Parent model query change: Raw query of parent model changes while parsed query doesn't change (whitespace added)
     new_parent_model = parent_model.copy(update={"query_": ParsableSql(sql="SELECT 1   , ds")})
-    # new_parent_model._is_metadata_only_change_cache = {}
 
     assert (
         new_parent_model.query_ != parent_model.query_
