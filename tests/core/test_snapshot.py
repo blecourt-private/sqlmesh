@@ -11,7 +11,6 @@ from _pytest.monkeypatch import MonkeyPatch
 from pytest_mock.plugin import MockerFixture
 from sqlglot import exp, to_column
 
-from sqlmesh.core import dialect as d
 from sqlmesh.core import constants as c
 from sqlmesh.core.audit import StandaloneAudit
 from sqlmesh.core.config import (
@@ -37,6 +36,7 @@ from sqlmesh.core.model import (
     load_sql_based_model,
     CustomKind,
 )
+from sqlmesh.core.model.common import ParsableSql
 from sqlmesh.core.model.kind import TimeColumn, ModelKindName
 from sqlmesh.core.node import IntervalUnit
 from sqlmesh.core.signal import signal
@@ -137,52 +137,40 @@ def test_parent_change(model: SqlModel, parent_model: SqlModel, make_snapshot):
     assert not new_snapshot.is_indirectly_modified(old_snapshot)
     assert not new_snapshot.is_metadata_updated(old_snapshot)
 
-    # Parent query format change
-    parent_expressions = d.parse(
-        """
-        MODEL (name "parent.tbl", dialect "spark");
+    # Raw query of parent model changes while parsed query doesn't change (whitespace added)
+    new_parent_model = parent_model.copy(
+        update={"query_": ParsableSql(sql="SELECT 1   , ds")}
+    )  # Added whitespace
 
-        SELECT 1, ds;
-        """
-    )
-
-    parent_model_parsed = load_sql_based_model(parent_expressions)
-
-    new_parent_expressions = d.parse(
-        """
-        MODEL (name "parent.tbl", dialect "spark");
-
-        SELECT 1   , ds;
-        """
-    )
-
-    new_parent_model_parsed = load_sql_based_model(new_parent_expressions)
-
-    assert new_parent_model_parsed.is_metadata_only_change(parent_model_parsed)
     assert (
-        new_parent_model_parsed.metadata_hash != parent_model_parsed.metadata_hash
-    )  # '4149036762' != '329280381' TODO: IS QUERY CHANGE IN FACT DETECTED AS METADATA CHANGE?
+        new_parent_model.query_ != parent_model.query_
+    )  # The raw query of the new parent model differs from the query of the previous parent model
     assert (
-        new_parent_model_parsed.data_hash != parent_model_parsed.data_hash
-    )  # '2446722999' == '2752166864'
+        new_parent_model.query == parent_model.query
+    )  # The parsed query of the new parent model is identical to the query of the previous parent model
+    assert (
+        new_parent_model.metadata_hash != parent_model.metadata_hash
+    )  # The raw query is included in the metadata via SqlModel._additional_metadata()
+    assert (
+        new_parent_model.data_hash != parent_model.data_hash
+    )  # The raw query is included in the data via SqlModel._data_hash_values_sql()
+    assert new_parent_model.is_metadata_only_change(
+        parent_model
+    )  # Query change is categorized as metadata only
 
-    old_snapshot = make_snapshot(
-        model, nodes={parent_model.fqn: parent_model_parsed, model.fqn: model}
-    )
+    old_snapshot = make_snapshot(model, nodes={parent_model.fqn: parent_model, model.fqn: model})
     new_snapshot = make_snapshot(
-        model, nodes={parent_model.fqn: new_parent_model_parsed, model.fqn: model}
+        model, nodes={parent_model.fqn: new_parent_model, model.fqn: model}
     )
 
-    assert (
-        new_snapshot.fingerprint.parent_data_hash != old_snapshot.fingerprint.parent_data_hash
-    )  # '3173312486' == '2538857394' # NB Doesn't match model fingerprints because parent data_hash is propagated in the snapshot parent_data_hash. So for the parent_model the parent data hash is "0" - the default value.
+    assert new_snapshot.fingerprint.parent_data_hash != old_snapshot.fingerprint.parent_data_hash
     assert (
         old_snapshot.fingerprint.parent_metadata_hash
         != new_snapshot.fingerprint.parent_metadata_hash
-    )  # '1995801057' != '1473062528'
+    )
+    assert not new_snapshot.is_metadata_updated(old_snapshot)
     assert not new_snapshot.is_directly_modified(old_snapshot)
     assert new_snapshot.is_indirectly_modified(old_snapshot)
-    assert not new_snapshot.is_metadata_updated(old_snapshot)
 
 
 def test_json(snapshot: Snapshot):
