@@ -168,11 +168,13 @@ class _Model(ModelMeta, frozen=True):
         state = super().__getstate__()
         private = state[PRIVATE_FIELDS]
         private["_statement_renderer_cache"] = {}
+        private["_is_metadata_only_change_cache"] = {}
         return state
 
     def copy(self, **kwargs: t.Any) -> Self:
         model = super().copy(**kwargs)
         model._statement_renderer_cache = {}
+        model._is_metadata_only_change_cache = {}
         return model
 
     def render(

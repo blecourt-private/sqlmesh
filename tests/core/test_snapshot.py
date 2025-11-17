@@ -118,15 +118,19 @@ def snapshot(
 
 
 def test_parent_change(model: SqlModel, parent_model: SqlModel, make_snapshot):
-    # Parent metadata change
+    # Parent model metadata change: description added
     new_parent_model = parent_model.copy(update={"description": "Parent model"})
+    # new_parent_model._is_metadata_only_change_cache = {}
+
+    assert new_parent_model.metadata_hash != parent_model.metadata_hash
+    assert new_parent_model.data_hash == parent_model.data_hash
+    assert not new_parent_model.is_breaking_change(parent_model)
+    assert new_parent_model.is_metadata_only_change(parent_model)
 
     old_snapshot = make_snapshot(model, nodes={parent_model.fqn: parent_model, model.fqn: model})
     new_snapshot = make_snapshot(
         model, nodes={new_parent_model.fqn: new_parent_model, model.fqn: model}
     )
-
-    assert new_parent_model.is_metadata_only_change(parent_model)
 
     assert old_snapshot.fingerprint.parent_data_hash == new_snapshot.fingerprint.parent_data_hash
     assert (
@@ -137,10 +141,9 @@ def test_parent_change(model: SqlModel, parent_model: SqlModel, make_snapshot):
     assert not new_snapshot.is_indirectly_modified(old_snapshot)
     assert not new_snapshot.is_metadata_updated(old_snapshot)
 
-    # Raw query of parent model changes while parsed query doesn't change (whitespace added)
-    new_parent_model = parent_model.copy(
-        update={"query_": ParsableSql(sql="SELECT 1   , ds")}
-    )  # Added whitespace
+    # Parent model query change: Raw query of parent model changes while parsed query doesn't change (whitespace added)
+    new_parent_model = parent_model.copy(update={"query_": ParsableSql(sql="SELECT 1   , ds")})
+    # new_parent_model._is_metadata_only_change_cache = {}
 
     assert (
         new_parent_model.query_ != parent_model.query_
@@ -154,9 +157,42 @@ def test_parent_change(model: SqlModel, parent_model: SqlModel, make_snapshot):
     assert (
         new_parent_model.data_hash != parent_model.data_hash
     )  # The raw query is included in the data via SqlModel._data_hash_values_sql()
+    assert not new_parent_model.is_breaking_change(parent_model)
     assert new_parent_model.is_metadata_only_change(
         parent_model
     )  # Query change is categorized as metadata only
+
+    old_snapshot = make_snapshot(model, nodes={parent_model.fqn: parent_model, model.fqn: model})
+    new_snapshot = make_snapshot(
+        model, nodes={parent_model.fqn: new_parent_model, model.fqn: model}
+    )
+
+    assert new_snapshot.fingerprint.parent_data_hash != old_snapshot.fingerprint.parent_data_hash
+    assert (
+        old_snapshot.fingerprint.parent_metadata_hash
+        != new_snapshot.fingerprint.parent_metadata_hash
+    )
+    assert not new_snapshot.is_metadata_updated(old_snapshot)
+    assert not new_snapshot.is_directly_modified(old_snapshot)
+    assert new_snapshot.is_indirectly_modified(old_snapshot)
+
+    # Parent model query change: Extra column selected
+    new_parent_model = parent_model.copy(update={"query_": ParsableSql(sql="SELECT 1, 2, ds")})
+
+    assert (
+        new_parent_model.query_ != parent_model.query_
+    )  # The raw query of the new parent model differs from the query of the previous parent model
+    assert (
+        new_parent_model.query != parent_model.query
+    )  # The parsed query of the new parent model is identical to the query of the previous parent model
+    assert (
+        new_parent_model.metadata_hash != parent_model.metadata_hash
+    )  # The raw query is included in the metadata via SqlModel._additional_metadata()
+    assert (
+        new_parent_model.data_hash != parent_model.data_hash
+    )  # The raw query is included in the data via SqlModel._data_hash_values_sql()
+    assert not new_parent_model.is_breaking_change(parent_model)
+    assert not new_parent_model.is_metadata_only_change(parent_model)
 
     old_snapshot = make_snapshot(model, nodes={parent_model.fqn: parent_model, model.fqn: model})
     new_snapshot = make_snapshot(
