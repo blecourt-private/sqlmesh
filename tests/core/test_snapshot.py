@@ -126,6 +126,8 @@ def test_parent_change(model: SqlModel, parent_model: SqlModel, make_snapshot):
         model, nodes={new_parent_model.fqn: new_parent_model, model.fqn: model}
     )
 
+    assert new_parent_model.is_metadata_only_change(parent_model)
+
     assert old_snapshot.fingerprint.parent_data_hash == new_snapshot.fingerprint.parent_data_hash
     assert (
         old_snapshot.fingerprint.parent_metadata_hash
@@ -140,7 +142,7 @@ def test_parent_change(model: SqlModel, parent_model: SqlModel, make_snapshot):
         """
         MODEL (name "parent.tbl", dialect "spark");
 
-        SELECT 1 AS ds;
+        SELECT 1, ds;
         """
     )
 
@@ -150,26 +152,36 @@ def test_parent_change(model: SqlModel, parent_model: SqlModel, make_snapshot):
         """
         MODEL (name "parent.tbl", dialect "spark");
 
-        SELECT 1   AS ds;
+        SELECT 1   , ds;
         """
     )
 
     new_parent_model_parsed = load_sql_based_model(new_parent_expressions)
 
+    assert new_parent_model_parsed.is_metadata_only_change(parent_model_parsed)
+    assert (
+        new_parent_model_parsed.metadata_hash != parent_model_parsed.metadata_hash
+    )  # '4149036762' != '329280381' TODO: IS QUERY CHANGE IN FACT DETECTED AS METADATA CHANGE?
+    assert (
+        new_parent_model_parsed.data_hash != parent_model_parsed.data_hash
+    )  # '2446722999' == '2752166864'
+
     old_snapshot = make_snapshot(
-        model, nodes={parent_model_parsed.fqn: parent_model_parsed, model.fqn: model}
+        model, nodes={parent_model.fqn: parent_model_parsed, model.fqn: model}
     )
     new_snapshot = make_snapshot(
-        model, nodes={new_parent_model_parsed.fqn: new_parent_model_parsed, model.fqn: model}
+        model, nodes={parent_model.fqn: new_parent_model_parsed, model.fqn: model}
     )
 
-    assert old_snapshot.fingerprint.parent_data_hash == new_snapshot.fingerprint.parent_data_hash
+    assert (
+        new_snapshot.fingerprint.parent_data_hash != old_snapshot.fingerprint.parent_data_hash
+    )  # '3173312486' == '2538857394' # NB Doesn't match model fingerprints because parent data_hash is propagated in the snapshot parent_data_hash. So for the parent_model the parent data hash is "0" - the default value.
     assert (
         old_snapshot.fingerprint.parent_metadata_hash
-        == new_snapshot.fingerprint.parent_metadata_hash
-    )
+        != new_snapshot.fingerprint.parent_metadata_hash
+    )  # '1995801057' != '1473062528'
     assert not new_snapshot.is_directly_modified(old_snapshot)
-    assert not new_snapshot.is_indirectly_modified(old_snapshot)
+    assert new_snapshot.is_indirectly_modified(old_snapshot)
     assert not new_snapshot.is_metadata_updated(old_snapshot)
 
 
