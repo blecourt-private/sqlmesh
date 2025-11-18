@@ -33,6 +33,7 @@ from sqlmesh.core.model import (
     ViewKind,
     load_sql_based_model,
 )
+from sqlmesh.core.model.common import ParsableSql
 from sqlmesh.core.model.kind import model_kind_type_from_name
 from sqlmesh.core.plan import Plan, SnapshotIntervals
 from sqlmesh.core.snapshot import (
@@ -683,6 +684,36 @@ def test_no_backfill_for_model_downstream_of_metadata_change(init_and_plan_conte
 
     # Make a metadata change upstream of the forward-only model.
     context.upsert_model("sushi.orders", owner="new_owner")
+
+    plan = context.plan_builder("test_dev").build()
+    assert plan.has_changes
+    assert not plan.directly_modified
+    assert not plan.indirectly_modified
+    assert not plan.missing_intervals
+    assert all(
+        snapshot.change_category == SnapshotChangeCategory.METADATA
+        for snapshot in plan.new_snapshots
+    )
+
+
+@time_machine.travel("2023-01-08 15:00:00 UTC")
+def test_no_backfill_for_model_downstream_of_raw_query_change(init_and_plan_context: t.Callable):
+    context, _ = init_and_plan_context("examples/sushi")
+    context.plan("prod", auto_apply=True, no_prompts=True, skip_tests=True)
+
+    # Make a change to raw query of sushi.marketing by removing an inline comment and adding whitespace.
+    # The sushi.marketing model is the direct parent of sushi.customer.
+    upstream_model = context.get_model("sushi.marketing")
+    updated_raw_query = ParsableSql(
+        sql="""SELECT
+      customer_id::INT     AS customer_id,
+      status::TEXT AS status,
+      updated_at::TIMESTAMP AS updated_at
+    FROM
+      sushi.raw_marketing
+    """
+    )
+    context.upsert_model("sushi.marketing", query_=updated_raw_query)
 
     plan = context.plan_builder("test_dev").build()
     assert plan.has_changes
